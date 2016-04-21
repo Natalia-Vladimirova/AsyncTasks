@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Net;
+using System.Net.Http;
+using System.IO;
+using System.Threading;
 
 namespace Task
 {
@@ -17,8 +22,13 @@ namespace Task
         /// <returns>The sequence of downloaded url content</returns>
         public static IEnumerable<string> GetUrlContent(this IEnumerable<Uri> uris)
         {
-            // TODO : Implement GetUrlContent
-            throw new NotImplementedException();
+            using (WebClient webClient = new WebClient())
+            {
+                foreach (var uri in uris)
+                {
+                    yield return webClient.DownloadString(uri);
+                }
+            }
         }
 
         /// <summary>
@@ -33,8 +43,37 @@ namespace Task
         /// <returns>The sequence of downloaded url content</returns>
         public static IEnumerable<string> GetUrlContentAsync(this IEnumerable<Uri> uris, int maxConcurrentStreams)
         {
-            // TODO : Implement GetUrlContentAsync
-            throw new NotImplementedException();
+            SemaphoreSlim throttler = new SemaphoreSlim(maxConcurrentStreams, maxConcurrentStreams);
+            Task<string>[] allTasks = new Task<string>[uris.Count()];
+            List<string> contents = new List<string>();
+
+            using (HttpClient client = new HttpClient())
+            {
+                int i = 0;
+                foreach (var uri in uris)
+                {
+                    throttler.Wait();
+                    allTasks[i++] = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        try
+                        {
+                            return await client.GetStringAsync(uri);
+                        }
+                        finally
+                        {
+                            throttler.Release();
+                        }
+                    });
+                }
+
+                System.Threading.Tasks.Task.WaitAll(allTasks);
+                foreach (var task in allTasks)
+                {
+                    contents.Add(task.Result);
+                }
+
+                return contents;
+            }
         }
 
         /// <summary>
@@ -45,10 +84,23 @@ namespace Task
         /// </summary>
         /// <param name="resource">Uri of resource</param>
         /// <returns>MD5 hash</returns>
-        public static Task<string> GetMD5Async(this Uri resource)
+        async public static Task<string> GetMD5Async(this Uri resource)
         {
-            // TODO : Implement GetMD5Async
-            throw new NotImplementedException();
+            using (WebClient webClient = new WebClient())
+            {
+                Stream resourceArray = await webClient.OpenReadTaskAsync(resource);
+
+                MD5 hash = MD5.Create();
+                byte[] hashArray = hash.ComputeHash(resourceArray);
+
+                StringBuilder sBuilder = new StringBuilder();
+                for (int i = 0; i < hashArray.Length; i++)
+                {
+                    sBuilder.Append(hashArray[i].ToString("x2"));
+                }
+                return sBuilder.ToString();
+            }
         }
+
     }
 }
